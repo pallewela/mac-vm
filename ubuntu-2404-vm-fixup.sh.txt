@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Fix for ubuntu-desktop installation failure on Ubuntu 24.04 (Noble) ARM64.
+#
+# Root cause: apt package list cache files for noble-updates and noble-security
+# were 0 bytes, so apt could not see newer packages (e.g. gnome-shell
+# 46.0-0ubuntu6~24.04.13) that satisfy the dependency constraints imposed by
+# already-installed security-updated packages (e.g. libglib2.0-0t64 2.80.0-6ubuntu3.8
+# which Breaks: gnome-shell < 46.0-0ubuntu5.1~).
+
+echo "==> Removing stale/empty apt cache files for noble-updates and noble-security..."
+sudo rm -f \
+  /var/lib/apt/lists/ports.ubuntu.com_ubuntu-ports_dists_noble-updates_main_binary-arm64_Packages \
+  /var/lib/apt/lists/ports.ubuntu.com_ubuntu-ports_dists_noble-security_main_binary-arm64_Packages
+
+echo "==> Forcing a full re-download of package lists..."
+sudo apt-get update --fix-missing
+
+echo "==> Installing ubuntu-desktop..."
+sudo apt-get install -y ubuntu-desktop
+
+echo "==> Done."
+

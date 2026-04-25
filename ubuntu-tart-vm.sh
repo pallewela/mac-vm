@@ -642,6 +642,22 @@ if [[ "$INSTALL_DESKTOP" == true ]]; then
   esac
   APT_EXTRA_PACKAGES="${DESKTOP_PACKAGE} ${DISPLAY_MANAGER}"
   DESKTOP_SYSTEMD_BLOCK="
+# Installing a desktop pulls in NetworkManager, which takes over from
+# systemd-networkd and drops the network interface.  Tell NM to manage all
+# devices so the existing DHCP lease is picked back up.
+echo \">>> Ensuring NetworkManager manages all network devices...\"
+sudo mkdir -p /etc/NetworkManager/conf.d
+cat <<'NMEOF' | sudo tee /etc/NetworkManager/conf.d/10-manage-all.conf
+[keyfile]
+unmanaged-devices=none
+NMEOF
+sudo systemctl restart NetworkManager 2>/dev/null || true
+
+### NOTE FOR FUTURE ###
+# This NetworkManager fix could perhaps be replaced with a simple
+# \\\`sudo netplan apply\\\` after the desktop install, which re-applies the
+# existing netplan config regardless of the active renderer.
+
 echo \">>> Configuring graphical login (${DISPLAY_MANAGER})...\"
 sudo systemctl set-default graphical.target
 sudo systemctl enable ${DISPLAY_MANAGER}"
