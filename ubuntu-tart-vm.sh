@@ -632,6 +632,7 @@ PROVISION_SCRIPT="${HOME}/.local/share/vms/${VM_NAME}-provision.sh"
 mkdir -p "$(dirname "$PROVISION_SCRIPT")"
 
 APT_EXTRA_PACKAGES=""
+NM_PRE_INSTALL_BLOCK=""
 DESKTOP_SYSTEMD_BLOCK=""
 if [[ "$INSTALL_DESKTOP" == true ]]; then
   case "$DESKTOP_PACKAGE" in
@@ -641,22 +642,23 @@ if [[ "$INSTALL_DESKTOP" == true ]]; then
     lightdm)         DISPLAY_MANAGER="lightdm" ;;
   esac
   APT_EXTRA_PACKAGES="${DESKTOP_PACKAGE} ${DISPLAY_MANAGER}"
-  DESKTOP_SYSTEMD_BLOCK="
-# Installing a desktop pulls in NetworkManager, which takes over from
-# systemd-networkd and drops the network interface.  Tell NM to manage all
-# devices so the existing DHCP lease is picked back up.
-echo \">>> Ensuring NetworkManager manages all network devices...\"
+  NM_PRE_INSTALL_BLOCK="
+# Pre-create NetworkManager config BEFORE installing the desktop meta-package.
+# The desktop pulls in NM, which takes over from systemd-networkd.  Without this
+# config NM leaves the primary interface unmanaged and drops the network.
+echo \">>> Pre-configuring NetworkManager to manage all devices...\"
 sudo mkdir -p /etc/NetworkManager/conf.d
 cat <<'NMEOF' | sudo tee /etc/NetworkManager/conf.d/10-manage-all.conf
 [keyfile]
 unmanaged-devices=none
-NMEOF
+NMEOF"
+  DESKTOP_SYSTEMD_BLOCK="
+# Safety-net: restart NM so it picks up the pre-created 10-manage-all.conf.
 sudo systemctl restart NetworkManager 2>/dev/null || true
 
 ### NOTE FOR FUTURE ###
-# This NetworkManager fix could perhaps be replaced with a simple
-# \\\`sudo netplan apply\\\` after the desktop install, which re-applies the
-# existing netplan config regardless of the active renderer.
+# The NetworkManager workaround (pre-created config + restart) could perhaps be
+# replaced with a simple \`sudo netplan apply\` after the desktop install.
 
 echo \">>> Configuring graphical login (${DISPLAY_MANAGER})...\"
 sudo systemctl set-default graphical.target
@@ -745,6 +747,7 @@ sudo -E apt-get update -y
 sudo -E apt-get install -y apt-fast
 
 wait_for_dpkg_lock
+${NM_PRE_INSTALL_BLOCK}
 
 echo ">>> Installing packages (SPICE tools${INSTALL_DESKTOP:+, desktop extras — may take a while})..."
 APT_OPTS=(-y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold")
