@@ -656,6 +656,11 @@ NMEOF"
 # Safety-net: restart NM so it picks up the pre-created 10-manage-all.conf.
 sudo systemctl restart NetworkManager 2>/dev/null || true
 
+# NM now owns networking; disable systemd-networkd's wait-online service so it
+# does not block boot waiting for interfaces that networkd no longer manages.
+echo \">>> Disabling systemd-networkd-wait-online (NM manages networking now)...\"
+sudo systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
+
 ### NOTE FOR FUTURE ###
 # The NetworkManager workaround (pre-created config + restart) could perhaps be
 # replaced with a simple \`sudo netplan apply\` after the desktop install.
@@ -788,9 +793,47 @@ if [[ "$VM_JUST_CREATED" == true ]]; then
   sshpass -p "$VM_PASSWORD" scp "${SSH_OPTS[@]}" \
     "$PROVISION_SCRIPT" "${VM_USER}@${VM_IP}:/tmp/provision.sh"
 
-  info "Running provisioning inside the guest (this may take a while)..."
+  info "Running provisioning inside the guest (detached — survives network blips)..."
   sshpass -p "$VM_PASSWORD" ssh "${SSH_OPTS[@]}" \
-    "${VM_USER}@${VM_IP}" "bash /tmp/provision.sh"
+    "${VM_USER}@${VM_IP}" "nohup bash /tmp/provision.sh </dev/null &>/dev/null &"
+
+  # Desktop installs pull in NetworkManager which can briefly drop the network
+  # and/or change the guest IP.  Poll with IP fallback until the script finishes.
+  # Stream the guest's provision log back to the host terminal as it appears.
+  info "Polling guest for provisioning completion (this may take a while)..."
+  PROVISION_DONE=false
+  _lines_seen=0
+  for _poll in $(seq 1 360); do          # up to ~30 min
+    sleep 5
+    # Build a deduplicated list of IPs to try.
+    _poll_ips=("$VM_IP")
+    _tart_ip="$(tart ip "$VM_NAME" 2>/dev/null || true)"
+    [[ -n "$_tart_ip" && "$_tart_ip" != "$VM_IP" ]] && _poll_ips+=("$_tart_ip")
+    for try_ip in "${_poll_ips[@]}"; do
+      _new="$(sshpass -p "$VM_PASSWORD" ssh "${SSH_OPTS[@]}" -o ConnectTimeout=5 \
+          "${VM_USER}@${try_ip}" \
+          "tail -n +$((_lines_seen + 1)) /var/log/provision.log 2>/dev/null; true" 2>/dev/null)" || continue
+      if [[ -n "$_new" ]]; then
+        echo "$_new"
+        _lines_seen=$((_lines_seen + $(echo "$_new" | wc -l)))
+        VM_IP="$try_ip"
+      fi
+      if echo "$_new" | grep -q 'Provisioning complete!'; then
+        PROVISION_DONE=true
+        break 2
+      fi
+      break  # SSH worked on this IP; skip remaining
+    done
+  done
+
+  if [[ "$PROVISION_DONE" != true ]]; then
+    err "Timed out waiting for provisioning to complete."
+    err "Check /var/log/provision.log inside the guest for details."
+    kill "$TART_PID" 2>/dev/null; wait "$TART_PID" 2>/dev/null || true
+    trap - EXIT INT TERM
+    exit 1
+  fi
+  ok "Provisioning complete!"
 
   stop_vm "$VM_USER" "$VM_PASSWORD" "$VM_IP" "$TART_PID"
   ok "VM stopped after provisioning"
