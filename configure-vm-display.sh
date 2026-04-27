@@ -67,10 +67,43 @@ if [[ -z "$MODE" ]]; then
   exit 1
 fi
 
-echo "==> Applying: mode=${MODE}, scale=${SCALE} (persistent)..."
-echo "    gdbus call ... ApplyMonitorsConfig ${SERIAL} 2 [(0,0,${SCALE},0,true,[('Virtual-1','${MODE}',{})])] []"
+# Extract refresh rate from mode string (e.g. "2560x1600@59.987" -> "59.987")
+RATE="${MODE##*@}"
+WIDTH="${RESOLUTION%%x*}"
+HEIGHT="${RESOLUTION##*x}"
 
-run_in_guest "gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.gnome.Mutter.DisplayConfig.ApplyMonitorsConfig ${SERIAL} 2 \"[(0, 0, ${SCALE}, uint32 0, true, [('Virtual-1', '${MODE}', @a{sv} {})])]\" '[]'"
+echo "==> Applying: mode=${MODE}, scale=${SCALE} (temporary — no confirmation dialog)..."
+echo "    gdbus call ... ApplyMonitorsConfig ${SERIAL} 1 [(0,0,${SCALE},0,true,[('Virtual-1','${MODE}',{})])] []"
+
+run_in_guest "gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.gnome.Mutter.DisplayConfig.ApplyMonitorsConfig ${SERIAL} 1 \"[(0, 0, ${SCALE}, uint32 0, true, [('Virtual-1', '${MODE}', @a{sv} {})])]\" '[]'"
+
+echo "==> Writing ~/.config/monitors.xml for persistence across reboots..."
+run_in_guest "mkdir -p ~/.config && cat > ~/.config/monitors.xml << 'XMLEOF'
+<monitors version=\"2\">
+  <configuration>
+    <logicalmonitor>
+      <x>0</x>
+      <y>0</y>
+      <scale>${SCALE}</scale>
+      <primary>yes</primary>
+      <monitor>
+        <monitorspec>
+          <connector>Virtual-1</connector>
+          <vendor>unknown</vendor>
+          <product>unknown</product>
+          <serial>unknown</serial>
+        </monitorspec>
+        <mode>
+          <width>${WIDTH}</width>
+          <height>${HEIGHT}</height>
+          <rate>${RATE}</rate>
+        </mode>
+      </monitor>
+    </logicalmonitor>
+  </configuration>
+</monitors>
+XMLEOF"
+echo "    wrote ~/.config/monitors.xml (${WIDTH}x${HEIGHT}@${RATE}, scale=${SCALE})"
 
 echo "==> Verifying..."
 VERIFY_STATE="$(run_in_guest 'gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.gnome.Mutter.DisplayConfig.GetCurrentState')"

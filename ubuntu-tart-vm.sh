@@ -690,7 +690,12 @@ sudo systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
 
 echo \">>> Configuring graphical login (${DISPLAY_MANAGER})...\"
 sudo systemctl set-default graphical.target
-sudo systemctl enable ${DISPLAY_MANAGER}"
+sudo systemctl enable ${DISPLAY_MANAGER}
+
+# Skip the GNOME Initial Setup welcome wizard on first login.
+echo \">>> Disabling GNOME Initial Setup welcome screen...\"
+mkdir -p ~/.config
+echo yes > ~/.config/gnome-initial-setup-done"
 fi
 
 APT_CACHE_FIX=""
