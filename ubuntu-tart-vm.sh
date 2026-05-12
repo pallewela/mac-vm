@@ -89,11 +89,11 @@ SSH_OPTS=(
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
 vm_exists() {
-  tart list -q 2>/dev/null | grep -qx "$1"
+  tart list -q 2>/dev/null | grep -x "$1"
 }
 
 vm_is_running() {
-  tart list 2>/dev/null | awk -v n="$1" '$2 == n { print $NF }' | grep -qx "running"
+  tart list 2>/dev/null | awk -v n="$1" '$2 == n { print $NF }' | grep -x "running"
 }
 
 # Wait for tart to report the guest IP (up to ~2 min).
